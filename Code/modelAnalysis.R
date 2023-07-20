@@ -13,12 +13,12 @@ setwd(dir = "C://Users/fire2/Downloads/ECU Internship '23/")
 dataSablefishSDM <- readxl::read_xlsx("data/sablefish.xlsx")
 
 # create sf object
-dataSablefishSF <- st_as_sf(x = dataSablefishSDM, coords = c("longitude", "latitude")) %>% 
+dataSablefishSF <- st_as_sf(x = dataSablefishSDM, coords = c("longitude", "latitude")) %>%
   st_set_crs(4326) %>% #geographic reference sys
   st_transform( "EPSG:5070") #set projected coords sys
 
 #download shapefile
-NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>% st_union() %>% 
+NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>% st_union() %>%
   st_transform(., crs = "EPSG:5070")
 
 
@@ -29,9 +29,9 @@ mesh <- make_mesh(dataSablefishSDM, xy_cols = c("X", "Y"), n_knots = 100)
 #fit the model -- use sdmTMB()--------------------------------------------------
 fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled)
                        +as.factor(gearGeneral),
-                       data = dataSablefishSDM, 
+                       data = dataSablefishSDM,
                       # control = sdmTMBcontrol(newton_loops = 1, nlminb_loops = 2),
-                       mesh = mesh, family = tweedie(link = "log"), 
+                       mesh = mesh, family = tweedie(link = "log"),
                        silent = FALSE) #run center of gravity on this model
 
 
@@ -49,7 +49,7 @@ ggplot() +
   geom_sf(data = NSAmerica) +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(dataSablefishSF$X)*1000-1000, max(dataSablefishSF$X)*1000+1000) +
-  ylim(min(dataSablefishSF$Y)*1000-1000, max(dataSablefishSF$Y)*1000+1000) 
+  ylim(min(dataSablefishSF$Y)*1000-1000, max(dataSablefishSF$Y)*1000+1000)
 
 #--(dont worry about this)--model comparison------------------------------------
 # cv -- cross validation
@@ -71,20 +71,20 @@ dataSablefishSDM$fold = folds.spatial$folds_ids
 model1 <- sdmTMB_cv(formula = logN1 ~ s(sst_scaled) +s(salinity_scaled) + s(ssh_scaled)
                     + s(distance_from_shore_scaled) +as.factor(gearGeneral),
                     data = dataSablefishSDM,
-                    mesh = mesh, family = tweedie(link = "log"), 
+                    mesh = mesh, family = tweedie(link = "log"),
                     silent = FALSE, fold_ids = "fold" )
 
 # model.SpatioT <- sdmTMB_cv(formula = logN1 ~ s(sst_scaled) +s(salinity_scaled) + s(ssh_scaled)
 #                     + s(distance_from_shore_scaled) +as.factor(gearGeneral),
 #                     data = dataSablefishSDM,
-#                     mesh = mesh, family = tweedie(link = "log"), 
+#                     mesh = mesh, family = tweedie(link = "log"),
 #                     silent = FALSE, fold_ids = "fold", time = "timeblock",
 #                     spatiotemporal = "iid" ) #iid -- identical and independantly destributed (every year separate, not related to one another) )
 
 model.NoSalinity <- sdmTMB_cv(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled)
                               + s(distance_from_shore_scaled) +as.factor(gearGeneral),
                               data = dataSablefishSDM, spatial = "on",
-                              mesh = mesh, family = tweedie(link = "log"), 
+                              mesh = mesh, family = tweedie(link = "log"),
                               silent = FALSE, fold_ids = "fold" )
 
 #looking for most pos/least neg output
@@ -100,10 +100,10 @@ model.NoSalinity$sum_loglik
 load(file = "data/Anoplopoma fimbria_grid.rdata")
 #try to plot(^^) sf object
 
-pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>% 
+pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>%
   group_by_at(c("region", "year", "latitude", "longitude", "X", "Y"
-                ,"timeblock", "sst_roms", "ssh_roms", "month")) %>% 
-  summarize(est = sum(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf)) %>% 
+                ,"timeblock", "sst_roms", "ssh_roms", "month")) %>%
+  summarize(est = sum(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf)) %>%
   mutate(est_responsescale = fitSablefish$family$linkinv(est))
 
 save(fitSablefish, pSable, file = "Results/prediction_fit_sablefish.rdata")
@@ -121,8 +121,8 @@ ggplot(pSable, aes(X, Y, fill = exp(est))) +
 
 #sf object based on pridiction data
 
-sablefishPre <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>% 
-  st_set_crs(4326) %>% 
+sablefishPre <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
+  st_set_crs(4326) %>%
   st_transform("EPSG:5070")
 
 ggplot() +
@@ -131,7 +131,7 @@ ggplot() +
   facet_wrap(~ timeblock, nrow=1) +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(dataSablefishSF$X)*1000-1000, max(dataSablefishSF$X)*1000+1000) +
-  ylim(min(dataSablefishSF$Y)*1000-1000, max(dataSablefishSF$Y)*1000+1000) 
+  ylim(min(dataSablefishSF$Y)*1000-1000, max(dataSablefishSF$Y)*1000+1000)
 
 
 
