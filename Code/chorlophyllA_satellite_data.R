@@ -8,7 +8,8 @@ library(httr)
 library(dplyr)
 library(rerddapXtracto)
 
-setwd(dir = "C://Users/fire2/Downloads/ECU Internship '23/")
+# Set working directory (not needed in an RProject)
+#setwd(dir = "C://Users/fire2/Downloads/ECU Internship '23/")
 
 # Import prediction grid
 load(file = "C://KDale/Projects/Phenology/Analysis/PredictionGrids/Anoplopoma fimbria_grid.rdata")
