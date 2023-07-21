@@ -55,8 +55,9 @@ save(extract, file = "chlor_a.rdata")
 load("chlor_a.rdata")
 
 # Add chlorophyll data to our prediction grid
-prediction_grid$chlor_a = extract$`mean chlor_a`
+prediction_grid$chlor_a = extract$`mean chlor_a` %>%
+  subset(., chlor_a < 10)
 
 # Save grid
-save(prediction_grid, file = "Anoplopoma fimbria_grid.rdata")
+save(prediction_grid, file = "data/Anoplopoma fimbria_grid.rdata")
 
