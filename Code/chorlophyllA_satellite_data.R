@@ -8,14 +8,8 @@ library(httr)
 library(dplyr)
 library(rerddapXtracto)
 
-# Set working directory (not needed in an RProject)
-#setwd(dir = "C://Users/fire2/Downloads/ECU Internship '23/")
-
 # Import prediction grid
-load(file = "C://KDale/Projects/Phenology/Analysis/PredictionGrids/Anoplopoma fimbria_grid.rdata")
-
-# Import prediction grid
-load(file = "C://KDale/Projects/Phenology/Analysis/PredictionGrids/Anoplopoma fimbria_grid.rdata")
+load(file = "data/Anoplopoma fimbria_grid.rdata")
 
 # Set URL for the satellite data file we're interested in
 chlor_a = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/erdMH1chlamday_R2022SQ.nc?chlor_a%5B(2022-12-16T00:00:00Z):1:(2022-12-16T00:00:00Z)%5D%5B(89.97916):1:(-89.97917)%5D%5B(-179.9792):1:(179.9792)%5D"
@@ -50,13 +44,9 @@ extract <- rxtracto(dataInfo, parameter = "chlor_a",
 save(extract, file = "chlor_a.rdata")
 load("chlor_a.rdata")
 
-# Add chlorophyll data to our prediction grid and re-save prediction grid
-save(extract, file = "chlor_a.rdata")
-load("chlor_a.rdata")
-
 # Add chlorophyll data to our prediction grid
 prediction_grid$chlor_a = extract$`mean chlor_a` %>%
-  subset(., chlor_a < 10)
+  subset(., chlor_a < 10) # remove outliers
 
 # Save grid
 save(prediction_grid, file = "data/Anoplopoma fimbria_grid.rdata")

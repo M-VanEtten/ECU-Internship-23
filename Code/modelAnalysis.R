@@ -169,23 +169,32 @@ model.NoSalinity$sum_loglik
 #prediction---------------------------------------------------------------------
 source("Code/createPredictionGrid.R")
 # Create prediction grid -- this takes a long time! It will save the grid as part of the function
-createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma_fimbria_grid.rdata")
+createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
 
 load(file = "data/Anoplopoma fimbria_grid.rdata")
 
-prediction_grid = subset(prediction_grid, latitude > 41 & gearGeneral != "MOCNESS")
+prediction_grid_roms = subset(prediction_grid_roms, latitude > 41)
+# Create a row for each gear type (these will ultimately be summed together)
+gearGeneral = unique(data$gearGeneral) # Get gear categories
+prediction_grid_roms <- expand_grid(prediction_grid_roms, gearGeneral) %>%
+  subset(., !sst_roms == 0 | !salinity_roms == 0, !ssh_roms == 0)
+
+# Create factored versions of year and timeblock
+prediction_grid_roms$year_scaled = as.vector(scale(prediction_grid_roms$year, center = T, scale = T)[,1])
+prediction_grid_roms$timeblock = factor(prediction_grid_roms$timeblock, levels = c("1995-1999", "2000-2004", "2005-2009", "2010-2014", "2015-2019"))
+save(prediction_grid_roms, grid.df, file = "data/Anoplopoma fimbria_grid.rdata")
 #try to plot(^^) sf object
 
 # Predict for the current time period on a full grid
-pSable <- predict(fitSablefish, newdata = prediction_grid) %>%
+pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>%
   group_by_at(c("region", "year", "latitude", "longitude", "X", "Y"
                 ,"timeblock", "sst_roms", "ssh_roms", "month", "chlor_a")) %>%
   summarize(est = sum(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf)) %>%
   ungroup() %>% mutate(chlor_a_scaled = scale(chlor_a)[,1]) %>% # center and scale chlorophyll
   mutate(est_chlor_diff = est - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
 
+# Write/read sablefish prediction results
 save(fitSablefish, pSable, file = "Results/prediction_fit_sablefish.rdata")
-
 load(file = "Results/prediction_fit_sablefish.rdata")
 
 # ggplot(pSable, aes(X, Y, fill = exp(est))) +
@@ -203,11 +212,10 @@ ggplot() +
   geom_sf(data = NSAmerica) +
   facet_wrap(~ timeblock, nrow=1) +
   #super enhances map to view GOA, CAN, NNAMERICA
-  xlim(min(prediction_grid$X)*1000-1000, max(prediction_grid$X)*1000+1000) +
-  ylim(min(prediction_grid$Y)*1000-1000, max(prediction_grid$Y)*1000+1000)
+  xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
+  ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
 
 # CHALLENGE - Plot match-mismatch difference (hint: use code above and change "color = ...")
-
 
 
 
