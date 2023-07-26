@@ -92,7 +92,11 @@ createSpeciesDataset <- function() {
 #dataSablefishSDM <- createSpeciesDataset()
 
 # Load data
-dataSablefishSDM <- read_xlsx("data/sablefish.xlsx", sheet = 1)
+dataSablefishSDM <- read_xlsx("data/sablefish.xlsx", sheet = 1)%>%
+  dplyr::select(!timeblock)
+timeblocks <- read_xlsx("C://KDale/Projects/Phenology/Data/timeblocks.xlsx", sheet =  1)
+dataSablefishSDM <- merge(dataSablefishSDM, timeblocks, by = "year") %>%
+  mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
 
 # Subset data to higher latitudes
 dataSablefishSDM <- subset(dataSablefishSDM, latitude > 35)
@@ -101,11 +105,11 @@ dataSablefishSDM <- subset(dataSablefishSDM, latitude > 35)
 mesh <- make_mesh(dataSablefishSDM, xy_cols = c("X", "Y"), n_knots = 200)
 
 #fit the model -- use sdmTMB()--------------------------------------------------
-fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled) + s(salinity_scaled) + as.factor(gearGeneral),
+fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled) + s(salinity_scaled) + as.factor(gearGeneral) ,
                        spatial = "on",
                        data = dataSablefishSDM,
                        # control = sdmTMBcontrol(newton_loops = 1, nlminb_loops = 2),
-                       mesh = mesh, family = tweedie(link = "log"),
+                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "iid", time = "timeblock_factor",
                        silent = FALSE) #run center of gravity on this model
 
 sanity(fitSablefish)
@@ -182,57 +186,97 @@ ggplot() +
 source("Code/createPredictionGrid.R")
 # Create prediction grid -- this takes a long time! It will save the grid as part of the function
 createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
+prediction_grid_roms = subset(prediction_grid_roms, latitude > 35)
 
 load(file = "data/Anoplopoma fimbria_grid.rdata")
 
-prediction_grid_roms = subset(prediction_grid_roms, latitude > 41)
-# Create a row for each gear type (these will ultimately be summed together)
-gearGeneral = unique(data$gearGeneral) # Get gear categories
-prediction_grid_roms <- expand_grid(prediction_grid_roms, gearGeneral) %>%
-  subset(., !sst_roms == 0 | !salinity_roms == 0, !ssh_roms == 0)
+prediction_grid_roms <- prediction_grid_roms %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "gearGeneral")) %>%
+  summarize(sst_scaled = mean(sst_scaled), sst_roms = mean(sst_roms), ssh_roms = mean(ssh_roms), salinity_roms = mean(salinity_roms), ssh_scaled = mean(ssh_scaled), salinity_scaled = mean(salinity_scaled), chlor_a = mean(chlor_a)) %>%
+  mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
 
-# Create factored versions of year and timeblock
-prediction_grid_roms$year_scaled = as.vector(scale(prediction_grid_roms$year, center = T, scale = T)[,1])
-prediction_grid_roms$timeblock = factor(prediction_grid_roms$timeblock, levels = c("1995-1999", "2000-2004", "2005-2009", "2010-2014", "2015-2019"))
-save(prediction_grid_roms, grid.df, file = "data/Anoplopoma fimbria_grid.rdata")
-#try to plot(^^) sf object
+prediction_grid.sf = st_as_sf(prediction_grid_roms, coords = c("longitude", "latitude"))
 
 # Predict for the current time period on a full grid
 pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>%
-  group_by_at(c("region", "year", "latitude", "longitude", "X", "Y"
-                ,"timeblock", "sst_roms", "ssh_roms", "month", "chlor_a")) %>%
-  summarize(est = sum(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf)) %>%
-  ungroup() %>% mutate(chlor_a_scaled = scale(chlor_a)[,1]) %>% # center and scale chlorophyll
-  mutate(est_chlor_diff = est - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
+  group_by_at(c("region", "year", "latitude", "longitude", "X", "Y", "timeblock")) %>%
+  summarize(est = mean(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf), mean_sst = mean(sst_roms), mean_ssh = mean(ssh_roms), mean_salinity = mean(salinity_roms), mean_chlor_a = mean(chlor_a)) %>%
+  ungroup() %>% mutate(chlor_a_scaled = scale(mean_chlor_a)[,1], est_scaled = scale(exp(fitSablefish$family$linkinv(est)-1))[,1]) %>% # center and scale chlorophyll
+  mutate(est_chlor_diff = est_scaled - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
 
 # Write/read sablefish prediction results
 save(fitSablefish, pSable, file = "Results/prediction_fit_sablefish.rdata")
 load(file = "Results/prediction_fit_sablefish.rdata")
 
-# ggplot(pSable, aes(X, Y, fill = exp(est))) +
-#   geom_raster() +
-#   scale_fill_viridis_c(trans = "sqrt")
+ggplot(pSable, aes(X, Y, fill = est)) +
+  facet_wrap(~ timeblock, nrow=1) +
+  geom_tile()
+  #scale_fill_viridis_c()
 
 #sf object based on prediction data
-sablefishPre <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
+pSable.sf <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
   st_set_crs(4326) %>%
   st_transform("EPSG:5070")
 
 # Plot biomass
 ggplot() +
-  geom_sf(data = sablefishPre, aes(color = exp(est))) +
-  geom_sf(data = NSAmerica) +
-  facet_wrap(~ timeblock, nrow=1) +
+  geom_sf(data = pSable.sf, aes(color = exp(fitSablefish$family$linkinv(est)-1))) +
+  #geom_sf(data = pSable.sf, aes(color = est)) +
+  geom_sf(data = NSAmerica, fill = "gray20") +
+  facet_wrap(~ timeblock, nrow=2) +
+  scale_color_gradient("Estimate", low = "darkred", high = "green3") +
+  theme_classic() +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
   ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
 
-# CHALLENGE - Plot match-mismatch difference (hint: use code above and change "color = ...")
+# Plot match-mismatch difference (hint: use code above and change "color = ...")
+ggplot() +
+  geom_sf(data = pSable.sf, aes(color = est_chlor_diff)) +
+  geom_sf(data = NSAmerica) +
+  facet_wrap(~ timeblock, nrow=1) +
+  theme_classic() +
+  scale_color_gradient2("Mismatch", low = "darkred", mid = "green3", high = "darkred")+
+  #super enhances map to view GOA, CAN, NNAMERICA
+  xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
+  ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
+
+# Center of gravity
+pSable.obj <- predict(fitSablefish, newdata = prediction_grid_roms, return_tmb_object = T)
+
+# -----------------------------------------------------------------------------
+calculateCenterOfGravity <- function(p, species) {
+
+  # Center of gravity per year in relation to environmental variables
+  years = unique(p$year)
+  cog.year = data.frame(matrix(ncol = 0, nrow = length(years)), year = NA, cog.lat = NA, cog.lon = NA, upr_y = NA, lwr_y = NA, upr_x = NA, lwr_x = NA,  avgsst = NA, avgssh = NA, avgsal= NA)
+
+  for (i in 1:length(years)) {
+    yearSubset = subset(p, year == years[i])
+    cog.year$cog.lat[i] = sum(yearSubset$est*yearSubset$latitude)/sum(yearSubset$est)
+    cog.year$cog.lon[i] = sum(yearSubset$est*yearSubset$longitude)/sum(yearSubset$est)
+    cog.year$upr_y[i] = max(yearSubset$latitude)
+    cog.year$lwr_y[i] = min(yearSubset$latitude)
+    cog.year$upr_x[i] = max(yearSubset$longitude)
+    cog.year$lwr_x[i] = min(yearSubset$longitude)
+    cog.year$avgsst[i] = mean(yearSubset$mean_sst)
+    cog.year$avgssh[i] = mean(yearSubset$mean_ssh)
+    cog.year$avgsal[i] = mean(yearSubset$mean_salinity)
+    cog.year$year[i] = years[i]
+    cog.year$species[i] = species
+  }
+
+  return(cog.year)
+
+}
+#-------------------------------------------------------------------------------
+cog <- calculateCenterOfGravity(pSable, species = "Anoplopoma fimbria")
+
+ggplot(cog, aes(cog.lon, y = cog.lat, color = year)) +
+  geom_pointrange(aes(xmin = lwr_x, xmax = upr_x)) +
+  geom_pointrange(aes(ymin = lwr_y, ymax = upr_y)) +
+  scale_colour_viridis_c()
 
 
-
-
-
-
+index <- get_index(pSable.obj, area = rep(4, length(unique(dataSablefishSDM$year))))
 
 
