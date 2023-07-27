@@ -5,7 +5,6 @@ library(openxlsx)
 library(ggplot2)
 library(sdmTMB)
 library(dplyr)
-library(mapping)
 library(blockCV)
 library(sf)
 library(tidyr)
@@ -111,7 +110,7 @@ fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled) + s(salin
                        spatial = "on",
                        data = dataSablefishSDM,
                        # control = sdmTMBcontrol(newton_loops = 1, nlminb_loops = 2),
-                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "iid", time = "timeblock",
+                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "off", time = "timeblock",
                        silent = FALSE) #run center of gravity on this model
 
 sanity(fitSablefish)
@@ -190,6 +189,8 @@ dev.off()
 
 # PREDICTION ---------------------------------------------------------------------
 source("Code/createPredictionGrid.R")
+source("Code/chorlophyllA_satellite_data.R")
+linkChlorophyll()
 # Create prediction grid -- this takes a long time! It will save the grid as part of the function
 #createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
 load(file = "data/Anoplopoma fimbria_grid.rdata")
@@ -233,7 +234,7 @@ ggplot() +
   geom_sf(data = pSable.sf, aes(color = fitSablefish$family$linkinv(est))) +
   geom_sf(data = NSAmerica, fill = "gray70", color = "black") +
   facet_wrap(~ timeblock, nrow=1) +
-  scale_color_gradient("Estimated /nabundance", low = "khaki1", high = "orchid4") +
+  scale_color_gradient("Estimated \nabundance", low = "khaki1", high = "orchid4") +
   theme_classic() +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
@@ -296,13 +297,45 @@ cog <- calculateCenterOfGravity(pSable, species = "Anoplopoma fimbria") %>%
   mutate(cog = as.character(timeblock))
 
 # Plot each year, color-coded by timeblock
-ggplot(cog, aes(cog.lon, y = cog.lat, color = timeblock)) +
+ggplot(cog, aes(cog.lon, y = cog.lat, color = year)) +
   geom_point(size = 3) +
-  scale_color_brewer(palette = "RdPu") +
+  # scale_color_brewer(palette = "RdPu") +
+  scale_color_gradient(low = "lightpink", high = "darkviolet") +
   theme_classic(base_size = 14) +
   labs(x = "Longitude", y = "Latitude")
 
+# Trend between center of gravity (latitude) and year - not significant
+ggplot() +
+  geom_smooth(data = cog, mapping =  aes(x = year, y = cog.lat), method = "lm", color = "black") +
+  geom_point(data = cog, mapping =  aes(x = year, y = cog.lat, color = year), size = 3) +
+  scale_color_gradient(low = "lightpink", high = "darkviolet") +
+  theme_classic(base_size = 14) +
+  labs(x = "Year", y = "Center of gravity [latitude]")
+
 # What proportion of catch is in each of the three sections? (GoA, Canada, continental US)
+for(i in 1:nrow(pSable)) {
+  if(pSable$latitude[i] < 48.49) {
+    pSable$country[i] = "Continental US"
+  } else if(pSable$latitude[i] > 54.7) {
+    pSable$country[i] = "Alaska"
+  } else {
+    pSable$country[i] = "Canada"
+  }
+}
+
+nPoints.by.region <- pSable %>% group_by_at(c("country")) %>%
+  summarize(n = n())
+
+prop.by.region <- pSable %>% group_by_at(c("country", "year", "timeblock")) %>%
+  summarize(est = mean(est)) %>%
+  merge(., nPoints.by.region) %>%
+  mutate(est_area_adjusted = est/n)
+
+ggplot(prop.by.region) +
+  geom_line(mapping = aes(x = year, y = est_area_adjusted, color = country), linewidth = 1.5) +
+  theme_classic(base_size = 14) +
+  labs(x = "Year", y = "Estimated abundance \nadjusted for number of tows")
+  scale_color_manual("Country", values = c("Alaska" = "goldenrod", "Canada" = "seagreen3", "Continental US" = "slateblue3") )
 
 
 # Match-mismatch: Bring the satellite data back in
