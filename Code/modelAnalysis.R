@@ -87,7 +87,7 @@ createSpeciesDataset <- function() {
   return(speciesData)
 }
 
-# Load or create data ------------------------------------------------------------
+# Load or create sablefish data ------------------------------------------------------------
 # Run function above (only necessary to do once unless you have new data)
 #dataSablefishSDM <- createSpeciesDataset()
 
@@ -190,13 +190,19 @@ dev.off()
 # PREDICTION ---------------------------------------------------------------------
 source("Code/createPredictionGrid.R")
 source("Code/chorlophyllA_satellite_data.R")
-linkChlorophyll()
-# Create prediction grid -- this takes a long time! It will save the grid as part of the function
-#createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
+
+# Create prediction grid and add chlorophyll -- these takes a LONG time to run!
+# ~ 20 min for the basic prediction grid
+# ~ 1.5 hours for the grid with chlorophyll data
+# Each function will save grids
+# createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
+# linkChlorophyll()
+
+# Load the basic grid
 load(file = "data/Anoplopoma fimbria_grid.rdata")
 
-# Subset prediction grid to latitudes >35
-prediction_grid_roms = subset(prediction_grid_roms, latitude > 35)
+# Subset prediction grid to latitudes >35 and < 59
+prediction_grid_roms = subset(prediction_grid_roms, latitude > 35 & longitude > -162)
 
 # Summarize across months (since month isn't in our model)
 prediction_grid_roms <- prediction_grid_roms %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "timeblock_factor", "gearGeneral")) %>%
@@ -211,10 +217,6 @@ pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>%
   group_by_at(c("region", "year", "latitude", "longitude", "X", "Y", "timeblock")) %>%
   summarize(est = mean(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf), mean_sst = mean(sst_roms), mean_ssh = mean(ssh_roms), mean_salinity = mean(salinity_roms)) %>%
   ungroup()
-
-# Chlorophyll -- need to revise these lines/get satellite data
-#mutate(chlor_a_scaled = scale(mean_chlor_a)[,1], est_scaled = scale(exp(fitSablefish$family$linkinv(est)-1))[,1]) %>% # center and scale chlorophyll
-# mutate(est_chlor_diff = est_scaled - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
 
 #sf object based on prediction data
 pSable.sf <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
@@ -240,16 +242,6 @@ ggplot() +
   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
   ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
 
-# Plot match-mismatch difference (hint: use code above and change "color = ...")
-# ggplot() +
-#   geom_sf(data = pSable.sf, aes(color = est_chlor_diff)) +
-#   geom_sf(data = NSAmerica) +
-#   facet_wrap(~ timeblock, nrow=1) +
-#   theme_classic() +
-#   scale_color_gradient2("Mismatch", low = "darkred", mid = "green3", high = "darkred")+
-#   #super enhances map to view GOA, CAN, NNAMERICA
-#   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
-#   ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
 
 # CENTER OF GRAVITY ------------------------------------------------------------
 
@@ -334,9 +326,36 @@ prop.by.region <- pSable %>% group_by_at(c("country", "year", "timeblock")) %>%
 ggplot(prop.by.region) +
   geom_line(mapping = aes(x = year, y = est_area_adjusted, color = country), linewidth = 1.5) +
   theme_classic(base_size = 14) +
-  labs(x = "Year", y = "Estimated abundance \nadjusted for number of tows")
+  labs(x = "Year", y = "Estimated abundance \nadjusted for number of tows") +
   scale_color_manual("Country", values = c("Alaska" = "goldenrod", "Canada" = "seagreen3", "Continental US" = "slateblue3") )
 
+# Match-mismatch ----------------------------------
+load("data/Anoplopoma fimbria_grid_chlorA.rdata")
 
-# Match-mismatch: Bring the satellite data back in
+# Load in chlorophyll grid and summarize across months
+prediction_grid_chlorA <- prediction_grid_chlorA %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "timeblock_factor")) %>%
+  summarize(mean_chlora = mean(chlor_a)) %>%
+  mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
+
+# Merge with prediction data
+pSable.chlorA <- merge(pSable, prediction_grid_chlorA) %>%
+  mutate(chlora_scaled = scale(mean_chlora)[,1]) %>%
+  mutate(est_scaled = scale(fitSablefish$family$linkinv(est))[,1]) %>%
+  mutate(mismatch = chlora_scaled - est_scaled)
+
+# Make sf object
+pSable.chlorA.sf <- st_as_sf(x = pSable.chlorA, coords = c("longitude", "latitude")) %>%
+  st_set_crs(4326) %>%
+  st_transform("EPSG:5070")
+
+# Plot match-mismatch difference
+ggplot() +
+  geom_sf(data = pSable.chlorA.sf, aes(color = mismatch)) +
+  geom_sf(data = NSAmerica) +
+  facet_wrap(~ timeblock, nrow=1) +
+  theme_classic() +
+  scale_color_gradient2("Mismatch \n(>0 = excess food)\n(<0 = not enough food)", low = "firebrick4", mid = "lightgreen", high = "#094205")+
+  #super enhances map to view GOA, CAN, NNAMERICA
+  xlim(min(prediction_grid_chlorA$X)*1000-1000, max(prediction_grid_chlorA$X)*1000+1000) +
+  ylim(min(prediction_grid_chlorA$Y)*1000-1000, max(prediction_grid_chlorA$Y)*1000+1000)
 
