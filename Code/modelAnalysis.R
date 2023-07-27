@@ -136,7 +136,7 @@ NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>%
 jpeg(filename = "Results/sablefish_positive_tows.jpg", width = 4, height = 6, units = "in", res = 400)
 ggplot() +
   geom_sf(data = subset(dataSablefishSF, logN1 > 0), aes(color = logN1)) +
-  geom_sf(data = NSAmerica, fill = "gray80", color = "black") +
+  geom_sf(data = NSAmerica, fill = "gray80", color = "black", linewidth = .5) +
   theme_classic() +
   #crops map to view GOA, CAN, NSAMERICA
   xlim(min(dataSablefishSF$X)*1000-1000, max(dataSablefishSF$X)*1000+1000) +
@@ -230,10 +230,10 @@ load(file = "Results/prediction_objects_sablefish.rdata")
 # FIGURES ----------------------------------------------------------------------
 # Plot biomass per timeblock on the original abundance scale
 ggplot() +
-  geom_sf(data = pSable.sf, aes(color = exp(fitSablefish$family$linkinv(est)-1))) +
+  geom_sf(data = pSable.sf, aes(color = fitSablefish$family$linkinv(est))) +
   geom_sf(data = NSAmerica, fill = "gray70", color = "black") +
   facet_wrap(~ timeblock, nrow=1) +
-  scale_color_gradient("Estimate", low = "khaki1", high = "orchid4") +
+  scale_color_gradient("Estimated /nabundance", low = "khaki1", high = "orchid4") +
   theme_classic() +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
@@ -289,7 +289,6 @@ calculateCenterOfGravity <- function(p, species) {
   }
 
   return(cog.year)
-
 }
 
 # Calculate center of gravity using our custom function above
@@ -302,4 +301,9 @@ ggplot(cog, aes(cog.lon, y = cog.lat, color = timeblock)) +
   scale_color_brewer(palette = "RdPu") +
   theme_classic(base_size = 14) +
   labs(x = "Longitude", y = "Latitude")
+
+# What proportion of catch is in each of the three sections? (GoA, Canada, continental US)
+
+
+# Match-mismatch: Bring the satellite data back in
 
