@@ -92,14 +92,16 @@ createSpeciesDataset <- function() {
 #dataSablefishSDM <- createSpeciesDataset()
 
 # Load data
-dataSablefishSDM <- read_xlsx("data/sablefish.xlsx", sheet = 1)%>%
+dataSablefishSDM <- read_xlsx("data/sablefish.xlsx", sheet = 1) %>%
   dplyr::select(!timeblock)
 timeblocks <- read_xlsx("C://KDale/Projects/Phenology/Data/timeblocks.xlsx", sheet =  1)
-dataSablefishSDM <- merge(dataSablefishSDM, timeblocks, by = "year") %>%
-  mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
+dataSablefishSDM <-subset(dataSablefishSDM, latitude > 35 & year <= 2018 & year >= 1995) %>%
+  merge(., timeblocks, by = "year") %>%
+  mutate(timeblock_factor = as.numeric(as.factor(timeblock)), timeblock = as.factor(timeblock))
+
+openxlsx::write.xlsx(dataSablefishSDM, "data/sablefish.xlsx")
 
 # Subset data to higher latitudes
-dataSablefishSDM <- subset(dataSablefishSDM, latitude > 35)
 
 #create mesh -- use make_mesh()-------------------------------------------------
 mesh <- make_mesh(dataSablefishSDM, xy_cols = c("X", "Y"), n_knots = 200)
@@ -109,7 +111,7 @@ fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled) + s(salin
                        spatial = "on",
                        data = dataSablefishSDM,
                        # control = sdmTMBcontrol(newton_loops = 1, nlminb_loops = 2),
-                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "iid", time = "timeblock_factor",
+                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "iid", time = "timeblock",
                        silent = FALSE) #run center of gravity on this model
 
 sanity(fitSablefish)
@@ -130,12 +132,15 @@ NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>% st_
   st_transform(., crs = "EPSG:5070")
 
 #plot map of NSAmerica + pos tows
+jpeg(filename = "Results/sablefish_positive_tows.jpg", width = 4, height = 6, units = "in", res = 400)
 ggplot() +
   geom_sf(data = subset(dataSablefishSF, logN1 > 0), aes(color = logN1)) +
-  geom_sf(data = NSAmerica) +
+  geom_sf(data = NSAmerica, fill = "gray70") +
+  theme_classic() +
   #crops map to view GOA, CAN, NSAMERICA
   xlim(min(dataSablefishSF$X)*1000-1000, max(dataSablefishSF$X)*1000+1000) +
   ylim(min(dataSablefishSF$Y)*1000-1000, max(dataSablefishSF$Y)*1000+1000)
+dev.off()
 
 # #--(dont worry about this)--model comparison------------------------------------
 # See the model comparison code!
@@ -185,70 +190,84 @@ ggplot() +
 #prediction---------------------------------------------------------------------
 source("Code/createPredictionGrid.R")
 # Create prediction grid -- this takes a long time! It will save the grid as part of the function
-createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
-prediction_grid_roms = subset(prediction_grid_roms, latitude > 35)
-
+#createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
 load(file = "data/Anoplopoma fimbria_grid.rdata")
 
-prediction_grid_roms <- prediction_grid_roms %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "gearGeneral")) %>%
-  summarize(sst_scaled = mean(sst_scaled), sst_roms = mean(sst_roms), ssh_roms = mean(ssh_roms), salinity_roms = mean(salinity_roms), ssh_scaled = mean(ssh_scaled), salinity_scaled = mean(salinity_scaled), chlor_a = mean(chlor_a)) %>%
+# Subset prediction grid to latitudes >35
+prediction_grid_roms = subset(prediction_grid_roms, latitude > 35)
+
+prediction_grid_roms <- prediction_grid_roms %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "timeblock_factor", "gearGeneral")) %>%
+  summarize(sst_scaled = mean(sst_scaled), sst_roms = mean(sst_roms), ssh_roms = mean(ssh_roms), salinity_roms = mean(salinity_roms), ssh_scaled = mean(ssh_scaled), salinity_scaled = mean(salinity_scaled)) %>%
   mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
 
 prediction_grid.sf = st_as_sf(prediction_grid_roms, coords = c("longitude", "latitude"))
 
-# Predict for the current time period on a full grid
+# Predict for the current time period on a full grid, then summarize
 pSable <- predict(fitSablefish, newdata = prediction_grid_roms) %>%
   group_by_at(c("region", "year", "latitude", "longitude", "X", "Y", "timeblock")) %>%
-  summarize(est = mean(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf), mean_sst = mean(sst_roms), mean_ssh = mean(ssh_roms), mean_salinity = mean(salinity_roms), mean_chlor_a = mean(chlor_a)) %>%
-  ungroup() %>% mutate(chlor_a_scaled = scale(mean_chlor_a)[,1], est_scaled = scale(exp(fitSablefish$family$linkinv(est)-1))[,1]) %>% # center and scale chlorophyll
-  mutate(est_chlor_diff = est_scaled - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
+  summarize(est = mean(est), est_rf = mean(est_rf),est_non_rf = mean(est_non_rf), mean_sst = mean(sst_roms), mean_ssh = mean(ssh_roms), mean_salinity = mean(salinity_roms)) %>%
+  ungroup()
 
-# Write/read sablefish prediction results
-save(fitSablefish, pSable, file = "Results/prediction_fit_sablefish.rdata")
-load(file = "Results/prediction_fit_sablefish.rdata")
-
-ggplot(pSable, aes(X, Y, fill = est)) +
-  facet_wrap(~ timeblock, nrow=1) +
-  geom_tile()
-  #scale_fill_viridis_c()
+# Chlorophyll -- need to revise these lines/get satellite data
+#mutate(chlor_a_scaled = scale(mean_chlor_a)[,1], est_scaled = scale(exp(fitSablefish$family$linkinv(est)-1))[,1]) %>% # center and scale chlorophyll
+# mutate(est_chlor_diff = est_scaled - chlor_a_scaled) # calculate difference between predicted abundance and chlor_a
 
 #sf object based on prediction data
 pSable.sf <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
   st_set_crs(4326) %>%
   st_transform("EPSG:5070")
 
-# Plot biomass
+# Create prediction object (note the "return_tmb_object = T")
+pSable.obj <- predict(fitSablefish, newdata = prediction_grid_roms, return_tmb_object = T)
+
+# Write/read sablefish prediction results -------------------------------------
+save(fitSablefish, pSable, pSable.obj, pSable.sf, file = "Results/prediction_objects_sablefish.rdata")
+load(file = "Results/prediction_objects_sablefish.rdata")
+
+# FIGURES ----------------------------------------------------------------------
+# Plot biomass per timeblock on the original abundance scale
 ggplot() +
   geom_sf(data = pSable.sf, aes(color = exp(fitSablefish$family$linkinv(est)-1))) +
-  #geom_sf(data = pSable.sf, aes(color = est)) +
-  geom_sf(data = NSAmerica, fill = "gray20") +
-  facet_wrap(~ timeblock, nrow=2) +
-  scale_color_gradient("Estimate", low = "darkred", high = "green3") +
+  geom_sf(data = NSAmerica, fill = "gray70", color = "black") +
+  facet_wrap(~ timeblock, nrow=1) +
+  scale_color_gradient("Estimate", low = "khaki1", high = "orchid4") +
   theme_classic() +
   #super enhances map to view GOA, CAN, NNAMERICA
   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
   ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
 
 # Plot match-mismatch difference (hint: use code above and change "color = ...")
-ggplot() +
-  geom_sf(data = pSable.sf, aes(color = est_chlor_diff)) +
-  geom_sf(data = NSAmerica) +
-  facet_wrap(~ timeblock, nrow=1) +
+# ggplot() +
+#   geom_sf(data = pSable.sf, aes(color = est_chlor_diff)) +
+#   geom_sf(data = NSAmerica) +
+#   facet_wrap(~ timeblock, nrow=1) +
+#   theme_classic() +
+#   scale_color_gradient2("Mismatch", low = "darkred", mid = "green3", high = "darkred")+
+#   #super enhances map to view GOA, CAN, NNAMERICA
+#   xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
+#   ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
+
+# CENTER OF GRAVITY ------------------------------------------------------------
+
+# Run center of gravity function provided by sdmTMB
+cog <- get_cog(pSable.obj, format = "long")
+
+# Get this into a format we can do things with
+cog.wide <-  pivot_wider(cog,  names_from = "coord", values_from = c("est", "lwr", "upr", "se"))
+
+# Plot
+ggplot(cog.wide, aes(est_X, est_Y, colour = timeblock)) +
+  geom_pointrange(aes(xmin = lwr_X, xmax = upr_X)) +
+  geom_pointrange(aes(ymin = lwr_Y, ymax = upr_Y)) +
   theme_classic() +
-  scale_color_gradient2("Mismatch", low = "darkred", mid = "green3", high = "darkred")+
-  #super enhances map to view GOA, CAN, NNAMERICA
-  xlim(min(prediction_grid_roms$X)*1000-1000, max(prediction_grid_roms$X)*1000+1000) +
-  ylim(min(prediction_grid_roms$Y)*1000-1000, max(prediction_grid_roms$Y)*1000+1000)
+  scale_color_brewer(palette = "RdPu")
 
-# Center of gravity
-pSable.obj <- predict(fitSablefish, newdata = prediction_grid_roms, return_tmb_object = T)
-
-# -----------------------------------------------------------------------------
+# Calculate center of gravity manually ----
 calculateCenterOfGravity <- function(p, species) {
 
   # Center of gravity per year in relation to environmental variables
   years = unique(p$year)
-  cog.year = data.frame(matrix(ncol = 0, nrow = length(years)), year = NA, cog.lat = NA, cog.lon = NA, upr_y = NA, lwr_y = NA, upr_x = NA, lwr_x = NA,  avgsst = NA, avgssh = NA, avgsal= NA)
+  cog.year = data.frame(matrix(ncol = 0, nrow = length(years)), year = NA, timeblock = NA, cog.lat = NA, cog.lon = NA, upr_y = NA, lwr_y = NA, upr_x = NA, lwr_x = NA,  avgsst = NA, avgssh = NA, avgsal= NA)
 
   for (i in 1:length(years)) {
     yearSubset = subset(p, year == years[i])
@@ -263,20 +282,21 @@ calculateCenterOfGravity <- function(p, species) {
     cog.year$avgsal[i] = mean(yearSubset$mean_salinity)
     cog.year$year[i] = years[i]
     cog.year$species[i] = species
+    cog.year$timeblock[i] = as.character(yearSubset$timeblock[1])
   }
 
   return(cog.year)
 
 }
-#-------------------------------------------------------------------------------
-cog <- calculateCenterOfGravity(pSable, species = "Anoplopoma fimbria")
 
-ggplot(cog, aes(cog.lon, y = cog.lat, color = year)) +
-  geom_pointrange(aes(xmin = lwr_x, xmax = upr_x)) +
-  geom_pointrange(aes(ymin = lwr_y, ymax = upr_y)) +
-  scale_colour_viridis_c()
+# Calculate center of gravity using our custom function above
+cog <- calculateCenterOfGravity(pSable, species = "Anoplopoma fimbria") %>%
+  mutate(cog = as.character(timeblock))
 
-
-index <- get_index(pSable.obj, area = rep(4, length(unique(dataSablefishSDM$year))))
-
+# Plot each year, color-coded by timeblock
+ggplot(cog, aes(cog.lon, y = cog.lat, color = timeblock)) +
+  geom_point(size = 3) +
+  scale_color_brewer(palette = "RdPu") +
+  theme_classic(base_size = 14) +
+  labs(x = "Longitude", y = "Latitude")
 
