@@ -110,7 +110,7 @@ fitSablefish <- sdmTMB(formula = logN1 ~ s(sst_scaled) + s(ssh_scaled) + s(salin
                        spatial = "on",
                        data = dataSablefishSDM,
                        # control = sdmTMBcontrol(newton_loops = 1, nlminb_loops = 2),
-                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "off", time = "timeblock",
+                       mesh = mesh, family = tweedie(link = "log"), spatiotemporal = "off",
                        silent = FALSE) #run center of gravity on this model
 
 sanity(fitSablefish)
