@@ -315,18 +315,21 @@ for(i in 1:nrow(pSable)) {
   }
 }
 
+# Get the number of prediction points for each region
 nPoints.by.region <- pSable %>% group_by_at(c("country")) %>%
   summarize(n = n())
 
+# Get the mean estimated abundance per region and merge in with the N prediction points
 prop.by.region <- pSable %>% group_by_at(c("country", "year", "timeblock")) %>%
   summarize(est = mean(est)) %>%
   merge(., nPoints.by.region) %>%
   mutate(est_area_adjusted = est/n)
 
+# Plot estimated abundance (adjusted for number of points in each region) for each year
 ggplot(prop.by.region) +
   geom_line(mapping = aes(x = year, y = est_area_adjusted, color = country), linewidth = 1.5) +
   theme_classic(base_size = 14) +
-  labs(x = "Year", y = "Estimated abundance \nadjusted for number of tows") +
+  labs(x = "Year", y = "Estimated abundance \nadjusted for number of points") +
   scale_color_manual("Country", values = c("Alaska" = "goldenrod", "Canada" = "seagreen3", "Continental US" = "slateblue3") )
 
 # Match-mismatch ----------------------------------
