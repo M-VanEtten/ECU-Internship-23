@@ -79,7 +79,7 @@ createSpeciesDataset <- function() {
   speciesData$Y = albert_equal_area[,2]
 
   # Add time block
-  timeblocks <- read_xlsx("C://KDale/Projects/Phenology/Data/timeblocks.xlsx", sheet =  1)
+  timeblocks <- read_xlsx("data/timeblocks.xlsx", sheet =  1)
   speciesData <- merge(speciesData, timeblocks, by = "year")
   speciesData$timeblock = factor(speciesData$timeblock, levels = c("1995-1999", "2000-2004", "2005-2009", "2010-2014", "2015-2019"))
 
@@ -87,14 +87,14 @@ createSpeciesDataset <- function() {
 
   return(speciesData)
 }
-#------------------------------------------------------------------------------
+
+# Load or create data ------------------------------------------------------------
 # Run function above (only necessary to do once unless you have new data)
 #dataSablefishSDM <- createSpeciesDataset()
 
-# Load data
 dataSablefishSDM <- read_xlsx("data/sablefish.xlsx", sheet = 1) %>%
   dplyr::select(!timeblock)
-timeblocks <- read_xlsx("C://KDale/Projects/Phenology/Data/timeblocks.xlsx", sheet =  1)
+timeblocks <- read_xlsx("data/timeblocks.xlsx", sheet =  1)
 dataSablefishSDM <-subset(dataSablefishSDM, latitude > 35 & year <= 2018 & year >= 1995) %>%
   merge(., timeblocks, by = "year") %>%
   mutate(timeblock_factor = as.numeric(as.factor(timeblock)), timeblock = as.factor(timeblock))
@@ -128,14 +128,15 @@ dataSablefishSF <- st_as_sf(x = dataSablefishSDM, coords = c("longitude", "latit
   st_transform( "EPSG:5070") #set projected coords sys
 
 #download shapefile
-NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>% st_union() %>%
+NSAmerica <- read_sf("data/North_South_America/North_South_America.shp") %>%
+  #st_union() %>%
   st_transform(., crs = "EPSG:5070")
 
 #plot map of NSAmerica + pos tows
 jpeg(filename = "Results/sablefish_positive_tows.jpg", width = 4, height = 6, units = "in", res = 400)
 ggplot() +
   geom_sf(data = subset(dataSablefishSF, logN1 > 0), aes(color = logN1)) +
-  geom_sf(data = NSAmerica, fill = "gray70") +
+  geom_sf(data = NSAmerica, fill = "gray80", color = "black") +
   theme_classic() +
   #crops map to view GOA, CAN, NSAMERICA
   xlim(min(dataSablefishSF$X)*1000-1000, max(dataSablefishSF$X)*1000+1000) +
@@ -187,7 +188,7 @@ dev.off()
 # model1$sum_loglik
 # model.NoSalinity$sum_loglik
 
-#prediction---------------------------------------------------------------------
+# PREDICTION ---------------------------------------------------------------------
 source("Code/createPredictionGrid.R")
 # Create prediction grid -- this takes a long time! It will save the grid as part of the function
 #createPredictionGrid(data = dataSablefishSDM, species = "Anoplopoma fimbria", path = "data/Anoplopoma fimbria_grid.rdata")
@@ -196,10 +197,12 @@ load(file = "data/Anoplopoma fimbria_grid.rdata")
 # Subset prediction grid to latitudes >35
 prediction_grid_roms = subset(prediction_grid_roms, latitude > 35)
 
+# Summarize across months (since month isn't in our model)
 prediction_grid_roms <- prediction_grid_roms %>% group_by_at(c("year", "X", "Y", "region", "latitude", "longitude", "timeblock", "timeblock_factor", "gearGeneral")) %>%
   summarize(sst_scaled = mean(sst_scaled), sst_roms = mean(sst_roms), ssh_roms = mean(ssh_roms), salinity_roms = mean(salinity_roms), ssh_scaled = mean(ssh_scaled), salinity_scaled = mean(salinity_scaled)) %>%
   mutate(timeblock_factor = as.numeric(as.factor(timeblock)))
 
+# Make an sf object
 prediction_grid.sf = st_as_sf(prediction_grid_roms, coords = c("longitude", "latitude"))
 
 # Predict for the current time period on a full grid, then summarize
@@ -220,7 +223,7 @@ pSable.sf <- st_as_sf(x = pSable, coords = c("longitude", "latitude")) %>%
 # Create prediction object (note the "return_tmb_object = T")
 pSable.obj <- predict(fitSablefish, newdata = prediction_grid_roms, return_tmb_object = T)
 
-# Write/read sablefish prediction results -------------------------------------
+# Save/load sablefish prediction results and fit -------------------------------------
 save(fitSablefish, pSable, pSable.obj, pSable.sf, file = "Results/prediction_objects_sablefish.rdata")
 load(file = "Results/prediction_objects_sablefish.rdata")
 
